@@ -1,0 +1,244 @@
+---
+title: "NYPD shooting incident report"
+output: pdf_document
+date: "2024-02-24"
+---
+
+```{r setup, include=FALSE}
+# Libraries used
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+```
+
+## Problem
+Utilizing data from NYPD shooting incidents, I aim to address the following inquiries: 'Which locations and times pose the greatest risk to young women in New York?' Additionally, I seek to explore the correlation between the number of incidents and the number of murders in specific boroughs.
+
+## Data Description
+The data being analyzed was collected and provided by the NYPD and spans from 2006 to 2022.
+Data to be used in the analysis:
+
+
+| Column Name              | Data Type| Description                                 |
+| ------------------------ |:--------:| -------------------------------------------:|
+| OCCUR_DATE               | chr      | Exact date of the shooting incident         |
+| OCCUR_TIME               | S3: hms  | Exact time of the shooting incident         |
+| BORO                     | chr      | Borough where the shooting incident occurred|
+| VIC_AGE_GROUP            | chr      | Victim’s age within a category              |
+| VIC_SEX                  | chr      | Victim’s sex description                    |
+| VIC_RACE                 | chr      | Victim’s race description                   |
+| STATISTICAL_MURDER_FLAG  | lgl      | Shooting resulted in the victim’s death which would be counted as a murder|
+
+## Import Data
+
+The data is initially imported allowing it to be analyzed.
+
+```{r get_data, echo=FALSE}
+## Get current data
+url_in = "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+```
+
+```{r import_data, echo=FALSE, include=FALSE}
+ny_inc_raw<-read_csv(url_in)
+```
+During data tiding and cleaning I choose to remove such variables INCIDENT_KEY, STATISTICAL_MURDER_FLAG, Latitude, Longitude, Lon_Lat, X_COORD_CD, Y_COORD_CD, PRECINCT, JURISDICTION_CODE, LOC_CLASSFCTN_DESC, LOC_OF_OCCUR_DESC, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, LOCATION_DESC, VIC_RACE.
+
+Additional changes: 
+
+* add OCCUR_YEAR (year of the shooting incident)
+* add OCCUR_HOUR (hour of the shooting incident)
+
+```{r tidy_data}
+ny_inc <- ny_inc_raw %>%
+  select(-c(INCIDENT_KEY, Latitude, Longitude, Lon_Lat, X_COORD_CD, Y_COORD_CD, PRECINCT, JURISDICTION_CODE, LOC_CLASSFCTN_DESC, LOC_OF_OCCUR_DESC, PERP_AGE_GROUP, PERP_SEX, PERP_RACE, LOCATION_DESC, VIC_RACE)) %>%
+  # change to date format and add hour, month, year of indecent
+  mutate(OCCUR_YEAR = as.factor(year(mdy(OCCUR_DATE))), OCCUR_HOUR=hour(OCCUR_TIME))
+head(ny_inc)
+```
+ Summary to check missing data
+ 
+```{r summary}
+ny_inc %>%
+  summarize(OCCUR_DATE_NA = sum(is.na(ny_inc$OCCUR_DATE)),
+            OCCUR_TIME_NA = sum(is.na(ny_inc$OCCUR_TIME)),
+            OCCUR_YEAR_NA = sum(is.na(ny_inc$OCCUR_YEAR)),
+            OCCUR_HOUR_NA = sum(is.na(ny_inc$OCCUR_HOUR)),
+            BORO_NA = sum(is.na(ny_inc$BORO)),
+            VIC_AGE_GROUP_NA = sum(is.na(ny_inc$VIC_AGE_GROUP)),
+            VIC_SEX_NA = sum(is.na(ny_inc$VIC_SEX))
+  )
+```
+As result we don't have missing data in the cleaned dataset.
+
+## Analysis
+
+Let's filter data for young female (<45 years).
+
+```{r filter_young_female}
+inc_vic_female <- ny_inc %>%
+  filter(VIC_SEX=="F", VIC_AGE_GROUP=="18-24"|VIC_AGE_GROUP=="25-44"|VIC_AGE_GROUP=="<18")
+head(inc_vic_female)
+```
+ 
+Group by borough and hour of shooting incidence.
+```{r group_by_boro_hour}
+inc_vic_female_by_boro <- inc_vic_female %>%
+  group_by(BORO, OCCUR_HOUR) %>%
+  summarise(N_INC=n(), N_MURDER=sum(STATISTICAL_MURDER_FLAG))
+head(inc_vic_female_by_boro)
+```
+
+Visualize how many female victims where in years from 2006 to 2021 for each borough.
+
+```{r by_hour}
+ggplot(inc_vic_female_by_boro, aes(x=OCCUR_HOUR, y=N_INC)) +
+  labs(x="Hour", y="Number of Incedents") +
+  ggtitle("Figure 1: Number of Incedents by Hour for Female", ) +
+  # center title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_col() +
+  facet_wrap(~BORO)
+```
+
+As we see, the most dangerous boroughs where Bronx and Brooklyn, the safest borough is Staten Island. Focus on Bronx and Brooklyn areas for analysis.
+
+```{r brooklin_bronx_inc}
+inc_brooklyn_bronx <- inc_vic_female_by_boro %>%
+  filter(BORO=="BROOKLYN"|BORO=="BRONX")
+head(inc_brooklyn_bronx)
+```
+
+```{r brooklin_bronx_by_hour}
+ggplot(inc_brooklyn_bronx, aes(x=OCCUR_HOUR, y=N_INC)) +
+  labs(x="Hour", y="Number of Incedents") +
+  ggtitle("Figure 2: Number of Incedents by Hour for Female in Brooklin and Bronx", ) +
+  # center title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_col() +
+  facet_wrap(~BORO)
+```
+After reviewing Figure 2, it's evident that the peak of violence occurs between 8pm and 4am. Further investigation is needed to determine if this pattern remains consistent across the years.
+
+```{r filter_by_bronx}
+inc_vic_female_bronx <- inc_vic_female %>%
+  filter(BORO=="BRONX")
+```
+
+```{r filter_by_brook}
+inc_vic_female_brook <- inc_vic_female %>%
+  filter(BORO=="BROOKLYN")
+```
+
+```{r violin_bronx}
+ggplot(inc_vic_female_bronx, aes(x=OCCUR_YEAR, y=OCCUR_HOUR)) +
+  labs(x="Year", y="Hour") +
+  ggtitle("Figure 3: Year vs Hour, Bronx", ) +
+  # center title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_violin()
+```
+
+```{r violin_brooklyn}
+ggplot(inc_vic_female_brook, aes(x=OCCUR_YEAR, y=OCCUR_HOUR)) +
+  labs(x="Year", y="Hour") +
+  ggtitle("Figure 4: Year vs Hour, Brooklyn", ) +
+  # center title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_violin()
+```
+We observe that the majority of incidents in the Bronx were reported during the late evening hours. However, the data for the year 2020 deviates from this trend, suggesting the need for additional data from other sources to facilitate further analysis. In Brooklyn, the distribution of incidents is consistent, with the most dangerous hours for young women being late evening and early morning.
+
+## Model
+The final step in the analysis involved creating a model to assess the relationship between the number of shootings and the corresponding number of murders per year for young women in both the safest borough (Staten Island) and the most dangerous borough (Brooklyn).
+
+First, filter data and group by year.
+```{r inc_murd_st}
+inc_murd_f_st <- inc_vic_female %>%
+  filter(BORO=="STATEN ISLAND") %>%
+  group_by(OCCUR_YEAR) %>%
+  summarise(N_INC=n(), N_MURDER=sum(STATISTICAL_MURDER_FLAG))
+head(inc_murd_f_st)
+```
+
+```{r inc_murd_brook}
+inc_murd_f_brook <- inc_vic_female %>%
+  filter(BORO=="BROOKLYN") %>%
+  group_by(OCCUR_YEAR) %>%
+  summarise(N_INC=n(), N_MURDER=sum(STATISTICAL_MURDER_FLAG))
+head(inc_murd_f_brook)
+```
+Create models and get summary.
+```{r model_brook}
+mod_brook <- lm(N_MURDER~N_INC, inc_murd_f_brook) 
+summary(mod_brook)
+```
+
+```{r model_st}
+mod_st <- lm(N_MURDER~N_INC, inc_murd_f_st) 
+summary(mod_st)
+```
+
+Lastly, I will be using my results to make predictions.
+
+```{r brook_pred}
+inc_murd_f_brook_pred <- inc_murd_f_brook %>%
+  mutate(pred = predict(mod_brook))
+```
+
+```{r st_pred}
+inc_murd_f_st_pred <- inc_murd_f_st %>%
+  mutate(pred = predict(mod_st))
+```
+Visualize real data and perdiction.
+```{r corr_brook}
+ggplot(inc_murd_f_brook_pred) + 
+  labs(x="Number of Incedents", y="Number of Murders") +
+  ggtitle("Figure 5: Correlation between incedents and murders in Brooklyn", ) +
+  # center title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_point(aes(x = N_INC, y = N_MURDER), color = "blue") +
+  geom_point(aes(x = N_INC, y = pred), color = "red")
+```
+
+```{r corr_st}
+ggplot(inc_murd_f_st_pred) + 
+  labs(x="Number of Incedents", y="Number of Murders") +
+  ggtitle("Figure 6: Correlation between incedents and murders in Staten Island", ) +
+  # center title
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_point(aes(x = N_INC, y = N_MURDER), color = "blue") +
+  geom_point(aes(x = N_INC, y = pred), color = "red")
+```
+For Brooklyn model:
+
+The model explains approximately 61.69% of the variance in the number of murders (N_MURDER) based on the number of incidents (N_INC) in Brooklyn.
+
+The intercept term is not statistically significant (p = 0.871057), indicating that when the number of incidents is zero, the expected number of murders is not significantly different from zero.
+
+The coefficient for number of incidents is zero is statistically significant (p = 0.000187), suggesting that for each additional incident in Brooklyn, the expected number of murders increases by approximately 0.19484.
+
+For the Staten Island model:
+
+The model explains approximately 26.13% of the variance in the number of murders based on the number of incidents in Staten Island.
+
+The intercept term is not statistically significant (p = 0.593), indicating that when the number of incidents is zero, the expected number of murders is not significantly different from zero.
+
+The coefficient for N_INC is statistically significant (p = 0.043), suggesting that for each additional incident in Staten Island, the expected number of murders increases by approximately 0.17797.
+
+Overall, both models indicate a positive relationship between the number of incidents and the number of murders, but the model for Brooklyn explains a larger proportion of the variance and has a higher coefficient for number of incidents, indicating a stronger relationship compared to the model for Staten Island.
+
+To enhance safety for young women in New York, we recommend allocating additional resources towards bolstering measures such as heightened police presence, community outreach programs, and crime prevention initiatives. These efforts aim to effectively address safety concerns and foster a more secure environment for young women across the city.
+
+## Bias
+Variations in geographical factors such as population density, urban infrastructure, and neighborhood characteristics could introduce biases into the analysis. Differences in policing strategies or community resources between boroughs may also affect the observed correlations.
+
+## Conclusion
+The analysis reveals significant spatial disparities in safety for young women across New York City boroughs. Brooklyn emerges as the most dangerous location, while Staten Island is deemed the safest.
+
+The analysis indicates that the peak of violence typically occurs between 8 pm and 4 am. This suggests a need for heightened vigilance and increased police presence during these hours to ensure the safety of young women.
+
+There is a notable correlation between the number of shooting incidents and the number of murders in specific boroughs, particularly in Brooklyn, where the correlation is strong. This underscores the importance of targeted interventions to address underlying factors contributing to violence in these areas.
+
+To mitigate safety risks and create a safer environment for young women in New York City, it is recommended to allocate additional resources towards initiatives such as increased police presence, community outreach programs, and crime prevention strategies. These efforts should be tailored to address the unique spatial and temporal patterns of violence identified in the analysis.
+
